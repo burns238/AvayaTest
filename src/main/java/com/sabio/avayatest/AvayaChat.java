@@ -10,8 +10,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 @Service
 public class AvayaChat {
 	
@@ -23,10 +21,12 @@ public class AvayaChat {
 	private String chatCommandEndpoint = "/csportal/cometd/";
 	private String handshakeEndpoint = "/csportal/cometd/handshake";
 	private String escalateMediaEndpoint = "/v1/escalatemedia";
+	private String pollingEndpoint = "/csportal/cometd/connect";
 	
-	ObjectMapper mapper = new ObjectMapper();
-	String callId = "";
-	String clientId = "";
+	private Boolean chatAvailable = false;
+	
+	private String callId = "";
+	private String clientId = "";
 	
 	@Autowired
 	private RestTemplate restTemplate;
@@ -138,40 +138,74 @@ public class AvayaChat {
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, body, String.class);
 		
 		JSONArray jsonArray = new JSONArray(response.getBody());
-		callId = jsonArray.getJSONObject(0).getJSONObject("data").getString("clientId");
+		callId = jsonArray.getJSONObject(0).getJSONObject("data").getString("callId");
 		
 		LOG.info("getCallId finished");
 
 	}
 	
-	public void sendMessage(String message) {
+	public Boolean sendMessage(String message) {
 		
 		LOG.info("sendMessage called");
 		
-		String URI = baseAvayaURI + avayaPort + chatCommandEndpoint;
-		String body = "{\"channel\":\"/service/csportalchat\",\"data\":{\"command\":\"chatsend\",\"callid\":\"" +
+		if (chatAvailable) {
+		
+			String URI = baseAvayaURI + avayaPort + chatCommandEndpoint;
+			String body = "{\"channel\":\"/service/csportalchat\",\"data\":{\"command\":\"chatsend\",\"callid\":\"" +
 		        callId + "\",\"message\":\"\"},\"id\":\"19\",\"clientId\":\"" + clientId + "\"}";
-		restTemplate.postForEntity(URI, body, String.class);
+			ResponseEntity<String> response = restTemplate.postForEntity(URI, body, String.class);
 		
-		LOG.info("sendMessage finished");
+			LOG.info("sendMessage finished");
+		
+			return handleEvents(response);
+		} else {
+			LOG.info("Agent not available");
+			return false;
+		}
 		
 	}
 	
-	
-	public void listen(String clientId, String callId) {
+	public Boolean pollEvents() {
 		
-		Boolean finished = false;
+		//LOG.info("pollEvents called");
 		
-		do {
-			
-			
-			
-		} while(!finished);
+		String URI = baseAvayaURI + avayaPort + pollingEndpoint;
+		String body = " {\"channel\":\"/meta/connect\",\"connectionType\":\"long-polling\","
+				+ "\"advice\":{\"timeout\":0},\"id\":\"5\",\"clientId\":\"" + clientId + "\"}";
+		ResponseEntity<String> response = restTemplate.postForEntity(URI, body, String.class);
 		
+		return handleEvents(response);
 		
 	}
-
-
+	
+	private Boolean handleEvents(ResponseEntity<String> response) {
+		
+		Boolean disconnected = false;
+		
+		JSONArray jsonArray = new JSONArray(response.getBody());
+		
+		for (int i=0; i < jsonArray.length(); i++) {
+			
+			String event = jsonArray.getJSONObject(i).getJSONObject("data").getString("event");
+			
+			if (event.equals("callDisconnected")) {
+				LOG.info("Chat disconnected");
+				disconnected = true;
+			} else if (event.equals("personEntered")) {
+				LOG.info("The agent has joined the chat");
+				chatAvailable = true;
+			} else {
+				String message = jsonArray.getJSONObject(0)
+						.getJSONObject("data")
+						.getJSONObject("chatmesg")
+						.getString("message");
+				LOG.info(message);
+			}
+		}
+		
+		return disconnected;
+	}	
+	
 	public AvayaChat() {
 		super();
 	}
