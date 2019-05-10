@@ -72,6 +72,7 @@ public class AvayaTestApplication implements CommandLineRunner {
 						scanner.close();
 						System.exit(0);
 					}
+					Thread.sleep(2000);
 				} while (responseFromAvaya);
 			} catch (Exception e) {
 				System.out.println("Sorry initialisation failed. Closing down");
