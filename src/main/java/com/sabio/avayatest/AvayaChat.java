@@ -37,16 +37,22 @@ public class AvayaChat {
 	@Autowired
 	private RestTemplate restTemplate;
 
-	public void chatInitiation() throws IOException {
+	public void chatInitiation() throws IOException, InterruptedException {
 
 		login();
 		escalateMedia();
 
 		handshake();
-		openConnection(clientId);
-		initiateCall(clientId);
-
-		getCallId(clientId);
+		openConnection();
+		initiateCall();
+		
+		do {
+			getCallId();
+			Thread.sleep(2000);
+		} while(callId.length() < 10);
+		
+		LOG.info("THIS IS MY CALL ID: " + callId);
+		
 	}
 
 	private void login() {
@@ -65,7 +71,6 @@ public class AvayaChat {
 		
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
 		set_cookie = response.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
-		LOG.info(response.getBody().toString());
 		LOG.info("login finished");
 
 	}
@@ -84,7 +89,6 @@ public class AvayaChat {
 		HttpEntity<String> request = new HttpEntity<>(body, headers);
 		
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
-		LOG.info(response.getBody().toString());
 		LOG.info("escalateMedia finished");
 
 	}
@@ -108,12 +112,11 @@ public class AvayaChat {
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
 		JSONArray jsonArray = new JSONArray(response.getBody());
 		clientId = jsonArray.getJSONObject(0).getString("clientId");
-		LOG.info(response.getBody().toString());
 		LOG.info("handshake finished");
 
 	}
 
-	private void openConnection(String clientId) {
+	private void openConnection() {
 
 		LOG.info("openConnection called");
 
@@ -125,12 +128,11 @@ public class AvayaChat {
 		HttpEntity<String> request = new HttpEntity<>(body, headers);
 		
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
-		LOG.info(response.getBody().toString());
 		LOG.info("openConnection finished");
 
 	}
 
-	private void initiateCall(String clientId) {
+	private void initiateCall() {
 
 		LOG.info("initiateCall called");
 
@@ -140,26 +142,36 @@ public class AvayaChat {
 		HttpHeaders headers = initialiseHeaders();     
 		HttpEntity<String> request = new HttpEntity<>(body, headers);
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
-		LOG.info(response.getBody().toString());
 		LOG.info("initiateCall finished");
 
 	}
 
-	private void getCallId(String clientId) throws IOException {
+	private void getCallId() throws IOException {
 
 		LOG.info("getCallId called");
 
-		String URI = baseAvayaURI + avayaPort + chatCommandEndpoint;
-		String body = "{\"channel\":\"/service/csportalchat\",\"data\":{\"command\":\"chatsend\",\"callid\":\"5515ea1f000000009493ae0a"
-				+ "235c0002\",\"message\":\"\"},\"id\":\"19\",\"clientId\":\"" + clientId + "\"}";
+		String URI = baseAvayaURI + avayaPort + pollingEndpoint;
+		String body = " {\"channel\":\"/meta/connect\",\"connectionType\":\"long-polling\","
+				+ "\"advice\":{\"timeout\":0},\"id\":\"5\",\"clientId\":\"" + clientId + "\"}";
 		HttpHeaders headers = initialiseHeaders();     
 		HttpEntity<String> request = new HttpEntity<>(body, headers);
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
 
 		JSONArray jsonArray = new JSONArray(response.getBody());
 		LOG.info(jsonArray.toString());
-		String dataString = jsonArray.getJSONObject(0).getString("data");
-		callId = new JSONObject(dataString).getString("callId");
+		for (int i = 0; i < jsonArray.length(); i++) {
+			
+			try {
+				String dataString = jsonArray.getJSONObject(i).getString("data");
+				LOG.info(dataString);
+				String possibleCallId = new JSONObject(dataString).getString("callid");
+				if (possibleCallId.length() > 10) {
+					callId = possibleCallId;
+				}
+			} catch (Exception e) {
+				//LOG.info(e.getMessage());
+			}
+		}
 		LOG.info(response.getBody().toString());
 		LOG.info("getCallId finished");
 
@@ -174,12 +186,12 @@ public class AvayaChat {
 
 			String URI = baseAvayaURI + avayaPort + chatCommandEndpoint;
 			String body = "{\"channel\":\"/service/csportalchat\",\"data\":{\"command\":\"chatsend\",\"callid\":\""
-					+ callId + "\",\"message\":\"\"},\"id\":\"19\",\"clientId\":\"" + clientId + "\"}";
+					+ callId + "\",\"message\":\"" + message + "\"},\"id\":\"19\",\"clientId\":\"" + clientId + "\"}";
 			HttpHeaders headers = initialiseHeaders();      
 			HttpEntity<String> request = new HttpEntity<>(body, headers);
 			ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
-			LOG.info(response.getBody().toString());
-			messages = handleEvents(response);
+			//LOG.info(response.getBody().toString());
+			//messages = handleEvents(response);
 		} else {
 			LOG.info("Agent not available");
 			messages.add("Agent not available");
@@ -196,7 +208,6 @@ public class AvayaChat {
 		HttpHeaders headers = initialiseHeaders();     
 		HttpEntity<String> request = new HttpEntity<>(body, headers);
 		ResponseEntity<String> response = restTemplate.postForEntity(URI, request, String.class);
-		LOG.info(response.getBody().toString());
 		return handleEvents(response);
 
 	}
@@ -204,24 +215,34 @@ public class AvayaChat {
 	ArrayList<String> handleEvents(ResponseEntity<String> response) {
 
 		ArrayList<String> messages = new ArrayList<String>();
+		//LOG.info("We're in handlevents");
 
 		JSONArray jsonArray = new JSONArray(response.getBody());
 
 		for (int i = 0; i < jsonArray.length(); i++) {
 
-			String event = jsonArray.getJSONObject(i).getJSONObject("data").getString("event");
-
-			if (event.equals("callDisconnected")) {
-				LOG.info("Chat disconnected");
-				messages.add("disconnected");
-			} else if (event.equals("personEntered")) {
-				LOG.info("The agent has joined the chat");
-				messages.add("chatAvailable");
-			} else {
-				String message = jsonArray.getJSONObject(0).getJSONObject("data").getJSONObject("chatmesg")
-						.getString("message");
-				messages.add(message);
-				LOG.info(message);
+			try {
+				String dataString = jsonArray.getJSONObject(i).getString("data");
+				String event = new JSONObject(dataString).getString("event");
+				
+				//LOG.info(dataString);
+				
+				if (event.equals("callDisconnected")) {
+					LOG.info("Chat disconnected");
+					messages.add("disconnected");
+				} else if (event.equals("personEntered")) {
+					LOG.info("The agent has joined the chat");
+					messages.add("chatAvailable");
+					chatAvailable = true;
+				} else {
+					//LOG.info("Incoming message!");
+					String message = new JSONObject(dataString).getJSONObject("chatmesg")
+							.getString("message");
+					messages.add("INCOMING MESSAGE: " + message);
+					//LOG.info(message);
+				}
+			} catch (Exception e) {
+				//LOG.info(e.getMessage());
 			}
 		}
 

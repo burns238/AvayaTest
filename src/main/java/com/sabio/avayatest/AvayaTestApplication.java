@@ -66,16 +66,16 @@ public class AvayaTestApplication implements CommandLineRunner {
 						// Running in separate thread to save blocking
 						MessageSender sender = new MessageSender(scanner, chat);
 						sender.run();
-
+						
 					} else if (chat.pollEvents().contains("disconnected")) {
 						System.out.println("Sorry you've been disconected. Closing down");
 						scanner.close();
 						System.exit(0);
 					}
 					Thread.sleep(2000);
-				} while (responseFromAvaya);
+				} while (true);
 			} catch (Exception e) {
-				System.out.println("Sorry initialisation failed. Closing down");
+				System.out.println("Sorry the application failed. Closing down");
 				System.out.println(e.getMessage());
 			}
 
